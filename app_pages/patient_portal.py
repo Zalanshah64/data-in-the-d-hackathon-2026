@@ -125,3 +125,29 @@ if summary["recent_visits"]:
     st.dataframe(visit_data, use_container_width=True, hide_index=True)
 else:
     st.caption("No recent visits.")
+
+# --- Self-serve requests ---
+REQUEST_LABELS = {
+    "CANCEL_APPOINTMENT": "Cancelled appointment",
+    "RESCHEDULE_APPOINTMENT": "Rescheduled appointment",
+    "UPDATE_INSURANCE": "Insurance update",
+    "REFILL_REQUEST": "Refill request",
+}
+
+st.subheader(":material/task_alt: My requests")
+if summary["requests"]:
+    request_data = [
+        {
+            "Date": r["CREATED_AT"].strftime("%Y-%m-%d %H:%M"),
+            "Request": REQUEST_LABELS.get(r["REQUEST_TYPE"], r["REQUEST_TYPE"]),
+            "Details": r["DETAILS"],
+            "Status": r["STATUS"].title(),
+        }
+        for r in summary["requests"]
+    ]
+    st.dataframe(request_data, use_container_width=True, hide_index=True)
+else:
+    st.caption(
+        "No requests yet. Ask Insaan in chat to cancel or reschedule a visit, "
+        "update your insurance, or request a refill."
+    )

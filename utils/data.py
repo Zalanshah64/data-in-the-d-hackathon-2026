@@ -103,7 +103,7 @@ def load_patient_summary(session, patient_id):
         """
         SELECT ENCOUNTER_DATE, ENCOUNTER_TYPE, CHIEF_COMPLAINT
         FROM HEALTHCARE_DW.CLINICAL.ENCOUNTERS
-        WHERE PATIENT_ID = ? AND STATUS = 'SCHEDULED'
+        WHERE PATIENT_ID = ? AND STATUS = 'SCHEDULED' AND ENCOUNTER_DATE >= CURRENT_DATE()
         ORDER BY ENCOUNTER_DATE
         """,
         params=[patient_id],
@@ -130,6 +130,17 @@ def load_patient_summary(session, patient_id):
         params=[patient_id],
     ).collect()
 
+    requests = session.sql(
+        """
+        SELECT REQUEST_TYPE, DETAILS, STATUS, CREATED_AT
+        FROM HEALTHCARE_DW.INSAAN.SELF_SERVE_REQUESTS
+        WHERE PATIENT_ID = ?
+        ORDER BY CREATED_AT DESC
+        LIMIT 10
+        """,
+        params=[patient_id],
+    ).collect()
+
     return {
         "diagnoses": diagnoses,
         "active_meds": active_meds,
@@ -137,4 +148,5 @@ def load_patient_summary(session, patient_id):
         "billing": billing,
         "upcoming": upcoming,
         "eligible_trials": eligible_trials[0]["CNT"] if eligible_trials else 0,
+        "requests": requests,
     }

@@ -1,0 +1,154 @@
+-- Stage 4: Self-serve actions exposed to INSAAN_AGENT as custom tools.
+-- Every procedure verifies the target row belongs to the given patient and
+-- logs the action to SELF_SERVE_REQUESTS.
+
+USE SCHEMA HEALTHCARE_DW.INSAAN;
+
+CREATE OR REPLACE PROCEDURE GET_UPCOMING_APPOINTMENTS(P_PATIENT_ID NUMBER)
+RETURNS VARCHAR
+LANGUAGE SQL
+AS
+$$
+DECLARE
+  result VARCHAR;
+BEGIN
+  SELECT COALESCE(ARRAY_AGG(OBJECT_CONSTRUCT(
+           'encounter_id', e.ENCOUNTER_ID,
+           'date', e.ENCOUNTER_DATE::VARCHAR,
+           'type', e.ENCOUNTER_TYPE,
+           'reason', e.CHIEF_COMPLAINT,
+           'provider', pr.FIRST_NAME || ' ' || pr.LAST_NAME,
+           'specialty', pr.SPECIALTY))
+           WITHIN GROUP (ORDER BY e.ENCOUNTER_DATE), ARRAY_CONSTRUCT())::VARCHAR
+    INTO :result
+    FROM HEALTHCARE_DW.CLINICAL.ENCOUNTERS e
+    LEFT JOIN HEALTHCARE_DW.CORE.PROVIDERS pr ON e.PROVIDER_ID = pr.PROVIDER_ID
+   WHERE e.PATIENT_ID = :P_PATIENT_ID AND e.STATUS = 'SCHEDULED' AND e.ENCOUNTER_DATE >= CURRENT_DATE();
+  RETURN result;
+END;
+$$;
+
+CREATE OR REPLACE PROCEDURE CANCEL_APPOINTMENT(P_PATIENT_ID NUMBER, P_ENCOUNTER_ID NUMBER)
+RETURNS VARCHAR
+LANGUAGE SQL
+AS
+$$
+DECLARE
+  appt_date DATE;
+  appt_type VARCHAR;
+BEGIN
+  SELECT MAX(ENCOUNTER_DATE), MAX(ENCOUNTER_TYPE) INTO :appt_date, :appt_type
+    FROM HEALTHCARE_DW.CLINICAL.ENCOUNTERS
+   WHERE ENCOUNTER_ID = :P_ENCOUNTER_ID AND PATIENT_ID = :P_PATIENT_ID AND STATUS = 'SCHEDULED';
+  IF (appt_date IS NULL) THEN
+    RETURN 'FAILED: no scheduled appointment ' || P_ENCOUNTER_ID || ' found for this patient.';
+  END IF;
+
+  UPDATE HEALTHCARE_DW.CLINICAL.ENCOUNTERS SET STATUS = 'CANCELLED'
+   WHERE ENCOUNTER_ID = :P_ENCOUNTER_ID AND PATIENT_ID = :P_PATIENT_ID;
+
+  INSERT INTO HEALTHCARE_DW.INSAAN.SELF_SERVE_REQUESTS (PATIENT_ID, REQUEST_TYPE, DETAILS, STATUS)
+  VALUES (:P_PATIENT_ID, 'CANCEL_APPOINTMENT',
+          'Cancelled ' || :appt_type || ' visit on ' || :appt_date::VARCHAR || ' (encounter ' || :P_ENCOUNTER_ID || ')',
+          'COMPLETED');
+
+  RETURN 'SUCCESS: cancelled ' || appt_type || ' visit on ' || appt_date::VARCHAR || '.';
+END;
+$$;
+
+CREATE OR REPLACE PROCEDURE RESCHEDULE_APPOINTMENT(P_PATIENT_ID NUMBER, P_ENCOUNTER_ID NUMBER, P_NEW_DATE VARCHAR)
+RETURNS VARCHAR
+LANGUAGE SQL
+AS
+$$
+DECLARE
+  old_date DATE;
+  appt_type VARCHAR;
+  new_date DATE;
+BEGIN
+  new_date := TRY_TO_DATE(:P_NEW_DATE);
+  IF (new_date IS NULL) THEN
+    RETURN 'FAILED: could not read the new date "' || P_NEW_DATE || '". Use YYYY-MM-DD.';
+  END IF;
+  IF (new_date < CURRENT_DATE()) THEN
+    RETURN 'FAILED: the new date must be in the future.';
+  END IF;
+
+  SELECT MAX(ENCOUNTER_DATE), MAX(ENCOUNTER_TYPE) INTO :old_date, :appt_type
+    FROM HEALTHCARE_DW.CLINICAL.ENCOUNTERS
+   WHERE ENCOUNTER_ID = :P_ENCOUNTER_ID AND PATIENT_ID = :P_PATIENT_ID AND STATUS = 'SCHEDULED';
+  IF (old_date IS NULL) THEN
+    RETURN 'FAILED: no scheduled appointment ' || P_ENCOUNTER_ID || ' found for this patient.';
+  END IF;
+
+  UPDATE HEALTHCARE_DW.CLINICAL.ENCOUNTERS SET ENCOUNTER_DATE = :new_date
+   WHERE ENCOUNTER_ID = :P_ENCOUNTER_ID AND PATIENT_ID = :P_PATIENT_ID;
+
+  INSERT INTO HEALTHCARE_DW.INSAAN.SELF_SERVE_REQUESTS (PATIENT_ID, REQUEST_TYPE, DETAILS, STATUS)
+  VALUES (:P_PATIENT_ID, 'RESCHEDULE_APPOINTMENT',
+          'Moved ' || :appt_type || ' visit from ' || :old_date::VARCHAR || ' to ' || :new_date::VARCHAR,
+          'COMPLETED');
+
+  RETURN 'SUCCESS: moved ' || appt_type || ' visit from ' || old_date::VARCHAR || ' to ' || new_date::VARCHAR || '.';
+END;
+$$;
+
+CREATE OR REPLACE PROCEDURE UPDATE_INSURANCE(P_PATIENT_ID NUMBER, P_NEW_INSURANCE VARCHAR)
+RETURNS VARCHAR
+LANGUAGE SQL
+AS
+$$
+DECLARE
+  old_ins VARCHAR;
+BEGIN
+  IF (TRIM(COALESCE(:P_NEW_INSURANCE, '')) = '') THEN
+    RETURN 'FAILED: insurance name is required.';
+  END IF;
+
+  SELECT MAX(PRIMARY_INSURANCE) INTO :old_ins
+    FROM HEALTHCARE_DW.CORE.PATIENTS WHERE PATIENT_ID = :P_PATIENT_ID;
+
+  UPDATE HEALTHCARE_DW.CORE.PATIENTS SET PRIMARY_INSURANCE = TRIM(:P_NEW_INSURANCE)
+   WHERE PATIENT_ID = :P_PATIENT_ID;
+
+  INSERT INTO HEALTHCARE_DW.INSAAN.SELF_SERVE_REQUESTS (PATIENT_ID, REQUEST_TYPE, DETAILS, STATUS)
+  VALUES (:P_PATIENT_ID, 'UPDATE_INSURANCE',
+          'Changed insurance from ' || COALESCE(:old_ins, 'none') || ' to ' || TRIM(:P_NEW_INSURANCE),
+          'COMPLETED');
+
+  RETURN 'SUCCESS: insurance updated from ' || COALESCE(old_ins, 'none') || ' to ' || TRIM(P_NEW_INSURANCE) || '.';
+END;
+$$;
+
+CREATE OR REPLACE PROCEDURE REQUEST_REFILL(P_PATIENT_ID NUMBER, P_MEDICATION_NAME VARCHAR)
+RETURNS VARCHAR
+LANGUAGE SQL
+AS
+$$
+DECLARE
+  med VARCHAR;
+  dose VARCHAR;
+  refills NUMBER;
+BEGIN
+  SELECT MAX_BY(MEDICATION_NAME, PRESCRIBED_DATE), MAX_BY(DOSAGE, PRESCRIBED_DATE),
+         MAX_BY(REFILLS_REMAINING, PRESCRIBED_DATE)
+    INTO :med, :dose, :refills
+    FROM HEALTHCARE_DW.PHARMACY.PRESCRIPTIONS
+   WHERE PATIENT_ID = :P_PATIENT_ID
+     AND LOWER(MEDICATION_NAME) LIKE '%' || LOWER(TRIM(:P_MEDICATION_NAME)) || '%';
+  IF (med IS NULL) THEN
+    RETURN 'FAILED: no prescription matching "' || P_MEDICATION_NAME || '" found for this patient.';
+  END IF;
+
+  INSERT INTO HEALTHCARE_DW.INSAAN.SELF_SERVE_REQUESTS (PATIENT_ID, REQUEST_TYPE, DETAILS, STATUS)
+  VALUES (:P_PATIENT_ID, 'REFILL_REQUEST',
+          'Refill requested for ' || :med || ' ' || COALESCE(:dose, '') ||
+          ' (' || COALESCE(:refills::VARCHAR, '0') || ' refills remaining)',
+          'SUBMITTED');
+
+  IF (COALESCE(refills, 0) = 0) THEN
+    RETURN 'SUBMITTED: refill request for ' || med || ' sent. No refills remain, so the pharmacy will contact the prescriber for renewal.';
+  END IF;
+  RETURN 'SUBMITTED: refill request for ' || med || ' ' || COALESCE(dose, '') || ' sent to the pharmacy (' || refills || ' refills remaining).';
+END;
+$$;
