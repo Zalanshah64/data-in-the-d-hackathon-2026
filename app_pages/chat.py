@@ -1,6 +1,8 @@
+import uuid
 import streamlit as st
 from utils.data import get_session, load_patient
 from utils.agent import call_agent
+from utils.translate import LANGUAGES, detect_and_translate, translate_from_english, log_message
 
 
 def _escape_dollars(text):
@@ -13,6 +15,11 @@ def _show_actions(actions):
         st.markdown(f":green[:material/check_circle: **{action}**]")
 
 
+def _show_language(lang):
+    if lang and lang != "en":
+        st.caption(f":material/translate: {LANGUAGES.get(lang, lang)}")
+
+
 session = get_session()
 pi = st.session_state.get("patient_info")
 
@@ -20,27 +27,52 @@ if not pi:
     st.info("Select a patient in the sidebar to start chatting.", icon=":material/person_search:")
     st.stop()
 
+if "chat_session_id" not in st.session_state:
+    st.session_state.chat_session_id = str(uuid.uuid4())
+
 st.caption(
-    "Ask me anything about your health, medications, costs, or appointments. "
+    "Ask me anything about your health, medications, costs, or appointments — in any language. "
     "I can also cancel or reschedule visits, update your insurance, and request refills."
 )
 
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
+def _render_body(slot, msg):
+    # Every bubble holds exactly one placeholder, so live and replayed messages share
+    # the same element layout and Streamlit doesn't leave stale labels behind.
+    with slot.container():
         st.markdown(_escape_dollars(msg["content"]))
         _show_actions(msg.get("actions", []))
+        _show_language(msg.get("lang"))
+
+
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        _render_body(st.empty(), msg)
 
 if prompt := st.chat_input("Ask Insaan..."):
-    st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
-        st.markdown(_escape_dollars(prompt))
+        slot = st.empty()
+        with slot.container():
+            st.markdown(_escape_dollars(prompt))
+            with st.spinner("Understanding..."):
+                detected, prompt_en = detect_and_translate(session, prompt)
+        user_msg = {"role": "user", "content": prompt, "content_en": prompt_en, "lang": detected}
+        _render_body(slot, user_msg)
+    pref = st.session_state.get("lang_pref", "auto")
+    lang = detected if pref == "auto" else pref
+    st.session_state.lang = lang
+    st.session_state.messages.append(user_msg)
+    log_message(session, st.session_state.chat_session_id, pi["patient_id"], "user", prompt_en, detected, prompt)
 
     with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
-            response, actions = call_agent(session, prompt, pi, st.session_state.messages)
-        st.markdown(_escape_dollars(response))
-        _show_actions(actions)
-    st.session_state.messages.append({"role": "assistant", "content": response, "actions": actions})
+        slot = st.empty()
+        with slot.container():
+            with st.spinner("Thinking..."):
+                response_en, actions = call_agent(session, prompt_en, pi, st.session_state.messages)
+                response = translate_from_english(session, response_en, lang)
+        bot_msg = {"role": "assistant", "content": response, "content_en": response_en, "actions": actions, "lang": lang}
+        _render_body(slot, bot_msg)
+    st.session_state.messages.append(bot_msg)
+    log_message(session, st.session_state.chat_session_id, pi["patient_id"], "assistant", response_en, lang, response)
 
     if actions:
         # Refresh patient record so the sidebar and portal reflect the change.

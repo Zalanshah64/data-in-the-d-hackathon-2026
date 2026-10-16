@@ -1,4 +1,5 @@
 import json
+from datetime import date
 import streamlit as st
 
 AGENT_FQN = "HEALTHCARE_DW.INSAAN.INSAAN_AGENT"
@@ -8,18 +9,23 @@ ACTION_TOOLS = {
     "RescheduleAppointment": "Appointment rescheduled",
     "UpdateInsurance": "Insurance updated",
     "RequestRefill": "Refill requested",
+    "BookAppointment": "Appointment booked",
 }
 
 
 def call_agent(session, user_message, patient_info, messages):
     """Return (response_text, actions) where actions lists the write tools the agent ran."""
-    context = f"I am patient {patient_info['full_name']} (PATIENT_ID {patient_info['patient_id']}). "
+    today = date.today()
+    context = (
+        f"I am patient {patient_info['full_name']} (PATIENT_ID {patient_info['patient_id']}). "
+        f"Today is {today:%A, %Y-%m-%d}. "
+    )
     full_message = context + user_message
 
     history = messages[:-1][-6:]
     if history:
         transcript = "\n".join(
-            f"{'Patient' if m['role'] == 'user' else 'Insaan'}: {m['content']}"
+            f"{'Patient' if m['role'] == 'user' else 'Insaan'}: {m.get('content_en', m['content'])}"
             for m in history
         )
         full_message = (

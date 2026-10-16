@@ -18,4 +18,5 @@ entities:
       - app_pages/admin_dashboard.py
       - utils/data.py
       - utils/agent.py
+      - utils/translate.py
       - .streamlit/config.toml
