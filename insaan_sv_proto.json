@@ -1,0 +1,69 @@
+{
+  "json_proto": {
+    "name": "INSAAN_HEALTHCARE_SV",
+    "database": "DEFAULT_DATABASE",
+    "schema": "INSAAN",
+    "semanticDescription": "Insaan Healthcare Patient Concierge - a semantic view for patient healthcare data including demographics, encounters, diagnoses, prescriptions, billing claims, payments, providers, organizations, clinical trials, and trial enrollments. Designed to answer patient questions about their health history, medications, costs, and trial eligibility.",
+    "tables": [
+      {
+        "database": "HEALTHCARE_DW", "schema": "CORE", "table": "PATIENTS",
+        "columnNames": ["PATIENT_ID", "MEDICAL_RECORD_NUMBER", "FIRST_NAME", "LAST_NAME", "DATE_OF_BIRTH", "GENDER", "RACE_ETHNICITY", "STATE_CODE", "ZIP_CODE", "PRIMARY_INSURANCE", "ENROLLMENT_DATE", "BLOOD_TYPE", "HAS_CHRONIC_CONDITION", "STATUS"]
+      },
+      {
+        "database": "HEALTHCARE_DW", "schema": "CLINICAL", "table": "ENCOUNTERS",
+        "columnNames": ["ENCOUNTER_ID", "PATIENT_ID", "PROVIDER_ID", "FACILITY_ORG_ID", "ENCOUNTER_DATE", "ENCOUNTER_TYPE", "LENGTH_OF_STAY_DAYS", "STATUS", "CHIEF_COMPLAINT"]
+      },
+      {
+        "database": "HEALTHCARE_DW", "schema": "CLINICAL", "table": "DIAGNOSES",
+        "columnNames": ["DIAGNOSIS_ID", "ENCOUNTER_ID", "PATIENT_ID", "ICD10_CODE", "DIAGNOSIS_DESCRIPTION", "CATEGORY", "IS_CHRONIC", "DIAGNOSIS_DATE", "DIAGNOSIS_RANK"]
+      },
+      {
+        "database": "HEALTHCARE_DW", "schema": "BILLING", "table": "CLAIMS",
+        "columnNames": ["CLAIM_ID", "CLAIM_NUMBER", "ENCOUNTER_ID", "PATIENT_ID", "PROVIDER_ID", "FACILITY_ORG_ID", "PAYER_NAME", "SERVICE_DATE", "SUBMITTED_DATE", "BILLED_AMOUNT", "STATUS", "PRIMARY_CPT_CODE", "ENCOUNTER_TYPE"]
+      },
+      {
+        "database": "HEALTHCARE_DW", "schema": "BILLING", "table": "PAYMENTS",
+        "columnNames": ["PAYMENT_ID", "CLAIM_ID", "CLAIM_NUMBER", "BILLED_AMOUNT", "ALLOWED_AMOUNT", "INSURANCE_PAID", "PATIENT_RESPONSIBILITY", "PAYMENT_DATE", "PAYMENT_METHOD", "CLAIM_STATUS"]
+      },
+      {
+        "database": "HEALTHCARE_DW", "schema": "PHARMACY", "table": "PRESCRIPTIONS",
+        "columnNames": ["PRESCRIPTION_ID", "RX_NUMBER", "ENCOUNTER_ID", "PATIENT_ID", "PROVIDER_ID", "MEDICATION_ID", "MEDICATION_NAME", "DOSAGE", "FREQUENCY", "PRESCRIBED_DATE", "DAYS_SUPPLY", "REFILLS_REMAINING", "COST", "STATUS", "PHARMACIST_NOTES"]
+      },
+      {
+        "database": "HEALTHCARE_DW", "schema": "PHARMACY", "table": "MEDICATIONS",
+        "columnNames": ["MEDICATION_ID", "NDC_CODE", "GENERIC_NAME", "BRAND_NAME", "DRUG_CLASS", "TREATS_ICD10", "ROUTE", "CONTROLLED"]
+      },
+      {
+        "database": "HEALTHCARE_DW", "schema": "CORE", "table": "PROVIDERS",
+        "columnNames": ["PROVIDER_ID", "NPI", "FIRST_NAME", "LAST_NAME", "SPECIALTY", "PRIMARY_ORG_ID", "CREDENTIAL", "YEARS_EXPERIENCE", "ACCEPTING_PATIENTS", "STATUS"]
+      },
+      {
+        "database": "HEALTHCARE_DW", "schema": "CORE", "table": "ORGANIZATIONS",
+        "columnNames": ["ORG_ID", "ORG_NAME", "ORG_TYPE", "HQ_CITY", "HQ_STATE", "BED_COUNT", "EMPLOYEE_COUNT", "NPI_NUMBER"]
+      },
+      {
+        "database": "HEALTHCARE_DW", "schema": "RESEARCH", "table": "CLINICAL_TRIALS",
+        "columnNames": ["TRIAL_ID", "NCT_NUMBER", "TRIAL_NAME", "PHASE", "SPONSOR_ORG_ID", "SITE_ORG_ID", "START_DATE", "END_DATE", "TARGET_ENROLLMENT", "STATUS", "THERAPEUTIC_AREA"]
+      },
+      {
+        "database": "HEALTHCARE_DW", "schema": "RESEARCH", "table": "TRIAL_ENROLLMENTS",
+        "columnNames": ["ENROLLMENT_ID", "TRIAL_ID", "PATIENT_ID", "ENROLLMENT_DATE", "STATUS", "ARM_ASSIGNMENT", "INFORMED_CONSENT_SIGNED"]
+      }
+    ],
+    "sqlSource": {
+      "queries": [
+        {"sqlText": "SELECT p.FIRST_NAME, p.LAST_NAME, p.DATE_OF_BIRTH, p.PRIMARY_INSURANCE, p.BLOOD_TYPE, p.STATE_CODE FROM HEALTHCARE_DW.CORE.PATIENTS p WHERE p.PATIENT_ID = 8416", "correspondingQuestion": "What is my patient profile information?"},
+        {"sqlText": "SELECT d.DIAGNOSIS_DESCRIPTION, d.CATEGORY, d.IS_CHRONIC, d.DIAGNOSIS_DATE, d.ICD10_CODE FROM HEALTHCARE_DW.CLINICAL.DIAGNOSES d WHERE d.PATIENT_ID = 8416 ORDER BY d.DIAGNOSIS_DATE DESC", "correspondingQuestion": "What are my diagnoses and conditions?"},
+        {"sqlText": "SELECT rx.MEDICATION_NAME, rx.DOSAGE, rx.FREQUENCY, rx.COST, rx.STATUS, rx.REFILLS_REMAINING FROM HEALTHCARE_DW.PHARMACY.PRESCRIPTIONS rx WHERE rx.PATIENT_ID = 8416 AND rx.STATUS = 'Active' ORDER BY rx.PRESCRIBED_DATE DESC", "correspondingQuestion": "What medications am I currently taking?"},
+        {"sqlText": "SELECT YEAR(c.SERVICE_DATE) AS YEAR, SUM(c.BILLED_AMOUNT) AS TOTAL_BILLED, SUM(p.PATIENT_RESPONSIBILITY) AS TOTAL_OUT_OF_POCKET, SUM(p.INSURANCE_PAID) AS TOTAL_INSURANCE_PAID FROM HEALTHCARE_DW.BILLING.CLAIMS c JOIN HEALTHCARE_DW.BILLING.PAYMENTS p ON c.CLAIM_ID = p.CLAIM_ID WHERE c.PATIENT_ID = 8416 GROUP BY YEAR(c.SERVICE_DATE) ORDER BY YEAR", "correspondingQuestion": "Why is my healthcare more expensive this year compared to last year?"},
+        {"sqlText": "SELECT c.CLAIM_NUMBER, c.SERVICE_DATE, c.BILLED_AMOUNT, c.STATUS, p.ALLOWED_AMOUNT, p.INSURANCE_PAID, p.PATIENT_RESPONSIBILITY FROM HEALTHCARE_DW.BILLING.CLAIMS c JOIN HEALTHCARE_DW.BILLING.PAYMENTS p ON c.CLAIM_ID = p.CLAIM_ID WHERE c.PATIENT_ID = 8416 ORDER BY c.SERVICE_DATE DESC LIMIT 10", "correspondingQuestion": "Can you explain my recent bills and what I owe?"},
+        {"sqlText": "SELECT ct.TRIAL_NAME, ct.PHASE, ct.THERAPEUTIC_AREA, ct.STATUS FROM HEALTHCARE_DW.RESEARCH.CLINICAL_TRIALS ct WHERE ct.STATUS = 'Recruiting' AND ct.THERAPEUTIC_AREA IN (SELECT DISTINCT CASE WHEN d.CATEGORY = 'Cardiovascular' THEN 'Cardiology' WHEN d.CATEGORY = 'Endocrine' THEN 'Endocrinology' WHEN d.CATEGORY = 'Metabolic' THEN 'Endocrinology' WHEN d.CATEGORY = 'Neurological' THEN 'Neurology' WHEN d.CATEGORY = 'Mental Health' THEN 'Psychiatry' ELSE d.CATEGORY END FROM HEALTHCARE_DW.CLINICAL.DIAGNOSES d WHERE d.PATIENT_ID = 8416)", "correspondingQuestion": "Am I eligible for any clinical trials based on my conditions?"},
+        {"sqlText": "SELECT e.ENCOUNTER_DATE, e.ENCOUNTER_TYPE, e.CHIEF_COMPLAINT, e.STATUS, pr.FIRST_NAME || ' ' || pr.LAST_NAME AS PROVIDER_NAME, pr.SPECIALTY FROM HEALTHCARE_DW.CLINICAL.ENCOUNTERS e JOIN HEALTHCARE_DW.CORE.PROVIDERS pr ON e.PROVIDER_ID = pr.PROVIDER_ID WHERE e.PATIENT_ID = 8416 ORDER BY e.ENCOUNTER_DATE DESC LIMIT 10", "correspondingQuestion": "What were my recent doctor visits?"},
+        {"sqlText": "SELECT e.ENCOUNTER_DATE, e.ENCOUNTER_TYPE, e.STATUS FROM HEALTHCARE_DW.CLINICAL.ENCOUNTERS e WHERE e.PATIENT_ID = 8416 AND e.STATUS = 'Scheduled' ORDER BY e.ENCOUNTER_DATE", "correspondingQuestion": "Do I have any upcoming appointments?"}
+      ]
+    },
+    "metadata": {
+      "warehouse": "DEFAULT_WH"
+    }
+  }
+}

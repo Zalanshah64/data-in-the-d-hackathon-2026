@@ -1,0 +1,21 @@
+definition_version: 2
+entities:
+  insaan:
+    type: streamlit
+    identifier:
+      name: INSAAN_APP
+      database: HEALTHCARE_DW
+      schema: INSAAN
+    query_warehouse: DEFAULT_WH
+    runtime_name: SYSTEM$ST_CONTAINER_RUNTIME_PY3_11
+    compute_pool: SYSTEM_COMPUTE_POOL_CPU
+    main_file: streamlit_app.py
+    artifacts:
+      - streamlit_app.py
+      - environment.yml
+      - app_pages/patient_portal.py
+      - app_pages/chat.py
+      - app_pages/admin_dashboard.py
+      - utils/data.py
+      - utils/agent.py
+      - .streamlit/config.toml
