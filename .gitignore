@@ -1,1 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Snowflake CLI build output
+output/
+
+# Editor / tooling
 .cortex/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local secrets
+.env
+.streamlit/secrets.toml
+
+# Hackathon submission artifacts
+*.zip
+build_pptx.py
+presentation.html
